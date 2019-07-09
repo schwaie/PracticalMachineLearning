@@ -1,0 +1,153 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Schwaie"
+date: '2019-07-08'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Overview
+
+The Weight Lifting Exercises Dataset was used to test various prediction models. First, the data was cleaned up so only variables with complete and predictive information was used to predict the model. Then, the training data was split into a training set and a validation set. The training set was used to fit a random forest model and a generalized boosting model. The random forest model was found to have the highest accuracy. The model was then re-trained on the complete training set. Then, the model was used to predict the test set. 
+
+## 2. Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## 3. The Data
+
+The data used in this analysis comes from the Weight Lifting Exercises Dataset. 
+The approach proposed for the Weight Lifting Exercises dataset is to investigate "how (well)" an activity was performed by the wearer. The quality of execution and investigate three aspects that pertain to qualitative activity recognition was defined as the following: the problem of specifying correct execution, the automatic and robust detection of execution mistakes, and how to provide feedback on the quality of execution to the user. This dataset contains data from an on-body sensing approach. 
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. 
+
+Sensors were fitted to the subject's waist, arm, gloves and dumbbells. To extract data on these, sliding window approach was used with different lengths from 0.5 second to 2.5 seconds, with 0.5 second overlap. In each step of the sliding window approach features on the Euler angles were calculated (roll, pitch and yaw), as well as the raw accelerometer, gyroscope and magnetometer readings. For the Euler angles of each of the four sensors eight features were calculated: mean, variance, standard deviation, max, min, amplitude, kurtosis and skew- ness, generating in total 96 derived feature sets.
+
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har.
+
+The first step is to load the data. 
+```{r, echo=TRUE}
+## getting data
+urlTrain <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urlTest <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(urlTrain, destfile = "./data/train.csv", mode = "wb")
+download.file(urlTest, destfile = "./data/test.csv", mode = "wb")
+library(readr)
+train <- read_csv("data/train.csv")
+test <- read_csv("data/test.csv")
+```
+Now, let's look at the dimensions and features of these datasets.
+```{r, echo=TRUE}
+dim(train)
+dim(test)
+str(train)
+```
+So each dataset has 160 columns of variables. 
+From the summary it appears that many columns contain a large number of NAs. 
+
+## 4. Cleaning Data
+
+160 columns indicates a large number of variables. From the structure of the dataset, many of these columns can be removed since they contain large number (or only) NAs. Also, columns of variables that have near zero tolerance can be removed. And lastly, the first 7 columns are identifiers (not predictors) and will be of no use for this study and can be removed. 
+```{r, echo=TRUE}
+##remove NAs
+trainData<- train[, colSums(is.na(train)) == 0]
+testData <- test[, colSums(is.na(test)) == 0]
+##make index of columns with near zero variance
+library(caret)
+NZV <- nearZeroVar(trainData)
+##remove columns with near zero variance from train and test data
+trainData <- trainData[, -NZV]
+testData  <- testData[, -NZV]
+##remove identifier colums
+trainData <- trainData[, -c(1:7)]
+testData <- testData[, -c(1:7)]
+dim(trainData)
+dim(testData)
+```
+This leaves us with 52 columns or variables. 
+Next, the train data will be split into a test and training set. To avoid confusion with the original test set, the test set from the training set will be called the validation set.
+```{r, echo=TRUE}
+inTrain <- createDataPartition(trainData$classe, p = 0.7, list = FALSE)
+training <- trainData[inTrain, ]
+validation <- trainData[-inTrain, ]
+dim(training)
+```
+## 5. Building a model
+
+To determine which model will be best at predicting `classe` based on the predictors that are left after cleaning the data, different models will be tested and evaluated based on accuracy. 
+
+The first model tested is the random forest model. 
+```{r, echo=TRUE}
+##set seed for reproducibility
+set.seed(33833)
+# instruct train to use 3-fold CV to select optimal tuning parameters
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+# fit model on training
+modelRF <- train(classe ~ ., data=training, method="rf", trControl=fitControl)
+# print final model to see tuning parameters it chose
+modelRF$finalModel
+```
+This model used 500 trees and tried 26 variables at each split. 
+Next, the model is validated using the `validation` set to see how well it performs.
+```{r, echo=TRUE}
+validation$classe <- as.factor(validation$classe)
+predictRF <- predict(modelRF, newdata=validation)
+ConfusionMatrixRF <- confusionMatrix(predictRF, validation$classe)
+ConfusionMatrixRF
+```
+The accuracy is 99.18%, so the predicted accuracy for out-of-sample error is 0.82%. 
+This is already an excellent model, but now the generalized boosted model will be tested.
+
+```{r, echo=TRUE}
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modelGBM  <- train(classe ~ ., data=training, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modelGBM$finalModel
+```
+Now the model can be used to predict the `classe` in the validation set. 
+```{r, echo=TRUE}
+predictGBM <- predict(modelGBM, newdata=validation)
+ConfusionMatrixGBM <- confusionMatrix(predictGBM, validation$classe)
+ConfusionMatrixGBM
+```
+The GBM model has an accuracy rate of 95.97%, also very good. 
+
+The next step could be to combine the two models into one, but since the random forest model gives a 99.18% accuracy, this isn't necessary. Therefore, the random forest model will be chosen.
+
+## 6. Re-train the data
+
+The training data was split up into a training set and a validation set. Now, the random forest model will be applied to the whole training set in order to get a better fit, which will then be used to predict the test set. 
+```{r, echo=TRUE}
+##set seed for reproducibility
+set.seed(33833)
+# instruct train to use 3-fold CV to select optimal tuning parameters
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+# fit model on complete train data set, trainData
+finalModelRF <- train(classe ~ ., data=trainData, method="rf", trControl=fitControl)
+# print final model to see tuning parameters it chose
+finalModelRF$finalModel
+```
+
+## 7. Predicting the test set
+
+Now, the re-trained random forest model can be used to predict the `testData` set. 
+
+```{r,echo=TRUE}
+##predicting the test set
+finalPredictRF <- predict(finalModelRF, newdata=testData)
+testPredictionResults <- data.frame(
+        problem_id=testData$problem_id,
+        predicted=finalPredictRF)
+testPredictionResults
+```
+
+## 8. References
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
